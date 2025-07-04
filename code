@@ -1,0 +1,116 @@
+#include <iostream>
+using namespace std;
+
+int main() {
+    int MAX_PRODUCTS = 10;
+    int MAX_CART_ITEMS = 10;
+    string productNames[MAX_PRODUCTS];
+    double productPrices[MAX_PRODUCTS];
+    int productQuantities[MAX_PRODUCTS];
+    bool isExpired[MAX_PRODUCTS];
+    bool isShippable[MAX_PRODUCTS];
+    double productWeights[MAX_PRODUCTS];
+    int productCount;
+    double customerBalance;
+    cout << "Enter your balance: ";
+    cin >> customerBalance;
+    cout << "How many products do you want to add? ";
+    cin >> productCount;
+    for (int i = 0; i < productCount; i++) {
+        cout <<"Product"<<(i+1) << ":\n";
+        cout << "Name: ";
+        cin.ignore();
+        getline(cin, productNames[i]);
+        cout << "Price: ";
+        cin >> productPrices[i];
+        cout << "Available quantity: ";
+        cin >> productQuantities[i];
+        cout << "Is it expired? (1 = yes, 0 = no): ";
+        cin >> isExpired[i];
+        cout << "Is it shippable? (1 = yes, 0 = no): ";
+        cin >> isShippable[i];
+        if (isShippable[i]) {
+            cout << "Weight (kg): ";
+            cin >> productWeights[i];
+        } else {
+            productWeights[i] = 0;
+        }
+    }
+
+    int cartProductIndexes[MAX_CART_ITEMS];
+    int cartQuantities[MAX_CART_ITEMS];
+    int cartSize;
+
+    cout << "\nHow many different items do you want to buy? ";
+    cin >> cartSize;
+
+    for (int i = 0; i < cartSize; i++) {
+        cout << "\nFor item " << (i + 1) << ":\n";
+        cout << "Enter product index (0 to " << productCount - 1 << "): ";
+        cin >> cartProductIndexes[i];
+        cout << "Enter quantity: ";
+        cin >> cartQuantities[i];
+    }
+
+    if (cartSize == 0) {
+        cout << "Cart is empty!" << endl;
+        return 0;
+    }
+
+    double subtotal = 0;
+    double shippingFees = 0;
+    double totalWeight = 0;
+
+    cout << "\n- * Shipment notice **\n";
+    for (int i = 0; i < cartSize; i++) {
+        int index = cartProductIndexes[i];
+        int quantity = cartQuantities[i];
+
+        if (isExpired[index]) {
+            cout << "Error: " << productNames[index] << " is expired!" << endl;
+            return 0;
+        }
+        if (quantity > productQuantities[index]) {
+            cout << "Error: Not enough " << productNames[index] << " in stock.\n";
+            return 0;
+        }
+
+        if (isShippable[index]) {
+            double weight = productWeights[index] * quantity;
+            int grams = (int)(weight * 1000);
+            totalWeight += weight;
+            cout << quantity << "x " << productNames[index] << "   " << grams << "g" << endl;
+            shippingFees += 15.0 * quantity;
+        }
+
+        subtotal += productPrices[index] * quantity;
+        productQuantities[index] -= quantity;
+    }
+
+    int kg = (int)totalWeight;
+    int decimal = (int)((totalWeight - kg) * 10);
+    cout << "Total package weight: " << kg << "." << decimal << "kg\n";
+
+    double total = subtotal + shippingFees;
+    if (customerBalance < total) {
+        cout << "Error: Not enough balance.\n";
+        return 0;
+    }
+
+    customerBalance -= total;
+
+    cout << "\n- * Checkout receipt **\n";
+    for (int i = 0; i < cartSize; i++) {
+        int index = cartProductIndexes[i];
+        int quantity = cartQuantities[i];
+        int cost = (int)(productPrices[index] * quantity);
+        cout << quantity << "x " << productNames[index] << "   " << cost << endl;
+    }
+
+    cout << "- -------------------\n";
+    cout << "Subtotal      " << (int)subtotal << endl;
+    cout << "Shipping      " << (int)shippingFees << endl;
+    cout << "Amount        " << (int)total << endl;
+
+    return 0;
+}
