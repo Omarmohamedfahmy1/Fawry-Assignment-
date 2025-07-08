@@ -1,0 +1,164 @@
+#include <iostream>
+#include <string>
+using namespace std;
+const int MAX_BOOKS = 100;
+class Book {
+public:
+    string isbn;
+    string title;
+    int year;
+    double price;
+    string type;
+    int stock;
+    string fileType; 
+
+    Book() {}
+
+    Book(string i, string t, int y, double p, string ty, int s = 0, string ft = "")
+        : isbn(i), title(t), year(y), price(p), type(ty), stock(s), fileType(ft) {}
+};
+
+class BookStore {
+private:
+    Book books[MAX_BOOKS];
+    int bookCount;
+
+public:
+    BookStore() {
+        bookCount = 0;
+    }
+
+    void addBook(Book b) {
+        if (bookCount < MAX_BOOKS) {
+            books[bookCount++] = b;
+            cout << "Book added successfully.\n";
+        } else {
+            cout << "Inventory is full.\n";
+        }
+    }
+
+    void showInventory() {
+        cout << "\nInventory:\n";
+        for (int i = 0; i < bookCount; i++) {
+            cout << "- " << books[i].title << " (" << books[i].isbn << ") [" << books[i].type << "]\n";
+        }
+    }
+    void removeOldBooks(int currentYear, int maxAge) {
+        for (int i = 0; i < bookCount; i++) {
+            if (currentYear - books[i].year > maxAge) {
+                for (int j = i; j < bookCount - 1; j++) {
+                    books[j] = books[j + 1];
+                }
+                bookCount--;
+                i--;
+            }
+        }
+        cout << "Old books removed.\n";
+    }
+    void buyBook(string isbn, int quantity, string email, string address) {
+        for (int i = 0; i < bookCount; i++) {
+            if (books[i].isbn == isbn) {
+                if (books[i].type == "showcase") {
+                    cout << "This book is for display only. Not for sale.\n";
+                    return;
+                }
+                if (books[i].type == "paper") {
+                    if (books[i].stock < quantity) {
+                        cout << "Not enough stock.\n";
+                        return;
+                    }
+                    books[i].stock -= quantity;
+                    cout << "Paid: $" << books[i].price * quantity << endl;
+                    cout << "Shipping paper book to address: " << address << endl;
+                } else if (books[i].type == "ebook") {
+                    cout << "Paid: $" << books[i].price * quantity << endl;
+                    cout << "Sending ebook to email: " << email << endl;
+                }
+                return;
+            }
+        }
+        cout << "Book not found.\n";
+    }
+};
+int main() {
+    BookStore store;
+    int choice;
+    while (true) {
+        cout << "\n--- Book Store Menu ---\n";
+        cout << "1. Add Book\n";
+        cout << "2. Show Inventory\n";
+        cout << "3. Buy Book\n";
+        cout << "4. Remove Old Books\n";
+        cout << "5. Exit\n";
+        cout << "Enter your choice: ";
+        cin >> choice;
+        if (choice == 1) {
+            string type;
+            cout << "Enter book type (paper / ebook / showcase): ";
+            cin >> type;
+            string isbn, title;
+            int year;
+            double price;
+            int stock = 0;
+            string fileType = "";
+            cout << "Enter ISBN: ";
+            cin >> isbn;
+            cout << "Enter title: ";
+            cin.ignore();
+            getline(cin, title);
+            cout << "Enter year: ";
+            cin >> year;
+
+            if (type == "showcase") {
+                store.addBook(Book(isbn, title, year, 0, type));
+            } else {
+                cout << "Enter price: ";
+                cin >> price;
+
+                if (type == "paper") {
+                    cout << "Enter stock quantity: ";
+                    cin >> stock;
+                    store.addBook(Book(isbn, title, year, price, type, stock));
+                } else if (type == "ebook") {
+                    cout << "Enter file type (PDF, EPUB...): ";
+                    cin >> fileType;
+                    store.addBook(Book(isbn, title, year, price, type, 0, fileType));
+                } else {
+                    cout << "Invalid type.\n";
+                }
+            }
+
+        } else if (choice == 2) {
+            store.showInventory();
+
+        } else if (choice == 3) {
+            string isbn, email, address;
+            int quantity;
+            cout << "Enter ISBN of book to buy: ";
+            cin >> isbn;
+            cout << "Enter quantity: ";
+            cin >> quantity;
+            cout << "Enter your email: ";
+            cin >> email;
+            cout << "Enter your address: ";
+            cin.ignore();
+            getline(cin, address);
+            store.buyBook(isbn, quantity, email, address);
+        } else if (choice == 4) {
+            int year, age;
+            cout << "Enter current year: ";
+            cin >> year;
+            cout << "Enter maximum allowed age of books: ";
+            cin >> age;
+            store.removeOldBooks(year, age);
+
+        } else if (choice == 5) {
+            cout << "Goodbye!\n";
+            break;
+
+        } else {
+            cout << "Invalid choice.\n";
+        }
+    }
+    return 0;
+}
