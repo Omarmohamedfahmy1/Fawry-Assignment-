@@ -1,0 +1,22 @@
+# .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# NuGet packages (restore from NuGet.org)
+packages/
+*.nupkg
+*.snupkg
+
+# dotnet publish output
+publish/
+
+# Secrets & local overrides  
+secrets.json
+appsettings.*.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
