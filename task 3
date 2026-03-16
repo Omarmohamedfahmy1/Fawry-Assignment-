@@ -1,0 +1,326 @@
+/*
+ * Role-Based Book Store (Code-First Approach)
+ *
+ * Roles:
+ *   ADMIN    -> add books, view inventory, remove old books, manage users
+ *   STAFF    -> view inventory, add books
+ *   CUSTOMER -> view inventory, buy books
+ *
+ * Code-First means: roles and permissions are defined here in code.
+ * The data model (users, roles, books) is designed in source code first,
+ * and any persistence layer would be derived from these definitions.
+ */
+
+#include <iostream>
+#include <string>
+using namespace std;
+
+// ─── Role definitions ────────────────────────────────────────────────────────
+
+enum Role {
+    ADMIN,
+    STAFF,
+    CUSTOMER
+};
+
+string roleName(Role r) {
+    if (r == ADMIN)    return "ADMIN";
+    if (r == STAFF)    return "STAFF";
+    return "CUSTOMER";
+}
+
+// ─── Permission helpers ───────────────────────────────────────────────────────
+
+bool canAddBook(Role r)        { return r == ADMIN || r == STAFF; }
+bool canViewInventory(Role r)  { return true; }
+bool canBuyBook(Role r)        { return r == CUSTOMER; }
+bool canRemoveOldBooks(Role r) { return r == ADMIN; }
+bool canManageUsers(Role r)    { return r == ADMIN; }
+
+// ─── Data models ─────────────────────────────────────────────────────────────
+
+const int MAX_BOOKS = 100;
+const int MAX_USERS = 50;
+
+class Book {
+public:
+    string isbn;
+    string title;
+    int    year;
+    double price;
+    string type;     // "paper", "ebook", "showcase"
+    int    stock;
+    string fileType;
+
+    Book() : year(0), price(0.0), stock(0) {}
+
+    Book(string i, string t, int y, double p, string ty, int s = 0, string ft = "")
+        : isbn(i), title(t), year(y), price(p), type(ty), stock(s), fileType(ft) {}
+};
+
+class User {
+public:
+    string username;
+    string password;
+    Role   role;
+
+    User() : role(CUSTOMER) {}
+    User(string u, string p, Role r) : username(u), password(p), role(r) {}
+};
+
+// ─── BookStore ────────────────────────────────────────────────────────────────
+
+class BookStore {
+private:
+    Book books[MAX_BOOKS];
+    int  bookCount;
+
+    User users[MAX_USERS];
+    int  userCount;
+
+    // Seed default users so the demo works out of the box
+    void seedUsers() {
+        users[userCount++] = User("admin",    "admin123",    ADMIN);
+        users[userCount++] = User("staff1",   "staff123",    STAFF);
+        users[userCount++] = User("customer1","customer123", CUSTOMER);
+    }
+
+public:
+    BookStore() : bookCount(0), userCount(0) {
+        seedUsers();
+    }
+
+    // ── Authentication ────────────────────────────────────────────────────────
+
+    bool login(const string& username, const string& password, User& outUser) {
+        for (int i = 0; i < userCount; i++) {
+            if (users[i].username == username && users[i].password == password) {
+                outUser = users[i];
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ── User management (ADMIN only) ──────────────────────────────────────────
+
+    void addUser(Role callerRole, const string& username,
+                 const string& password, Role newRole) {
+        if (!canManageUsers(callerRole)) {
+            cout << "Access denied: only ADMIN can manage users.\n";
+            return;
+        }
+        if (userCount >= MAX_USERS) {
+            cout << "User limit reached.\n";
+            return;
+        }
+        users[userCount++] = User(username, password, newRole);
+        cout << "User '" << username << "' added with role " << roleName(newRole) << ".\n";
+    }
+
+    void listUsers(Role callerRole) {
+        if (!canManageUsers(callerRole)) {
+            cout << "Access denied: only ADMIN can list users.\n";
+            return;
+        }
+        cout << "\nRegistered users:\n";
+        for (int i = 0; i < userCount; i++) {
+            cout << "  " << users[i].username << " [" << roleName(users[i].role) << "]\n";
+        }
+    }
+
+    // ── Book operations ───────────────────────────────────────────────────────
+
+    void addBook(Role callerRole, Book b) {
+        if (!canAddBook(callerRole)) {
+            cout << "Access denied: your role cannot add books.\n";
+            return;
+        }
+        if (bookCount >= MAX_BOOKS) {
+            cout << "Inventory is full.\n";
+            return;
+        }
+        books[bookCount++] = b;
+        cout << "Book '" << b.title << "' added successfully.\n";
+    }
+
+    void showInventory(Role callerRole) {
+        if (!canViewInventory(callerRole)) {
+            cout << "Access denied.\n";
+            return;
+        }
+        cout << "\nInventory:\n";
+        for (int i = 0; i < bookCount; i++) {
+            cout << "  [" << books[i].isbn << "] " << books[i].title
+                 << " (" << books[i].type << ")";
+            if (books[i].type == "paper")
+                cout << " stock=" << books[i].stock;
+            cout << " $" << books[i].price << "\n";
+        }
+    }
+
+    void buyBook(Role callerRole, const string& isbn, int quantity,
+                 const string& email, const string& address) {
+        if (!canBuyBook(callerRole)) {
+            cout << "Access denied: only CUSTOMER can buy books.\n";
+            return;
+        }
+        for (int i = 0; i < bookCount; i++) {
+            if (books[i].isbn == isbn) {
+                if (books[i].type == "showcase") {
+                    cout << "This book is for display only. Not for sale.\n";
+                    return;
+                }
+                if (books[i].type == "paper") {
+                    if (books[i].stock < quantity) {
+                        cout << "Not enough stock.\n";
+                        return;
+                    }
+                    books[i].stock -= quantity;
+                    cout << "Paid: $" << books[i].price * quantity << "\n";
+                    cout << "Shipping paper book to: " << address << "\n";
+                } else if (books[i].type == "ebook") {
+                    cout << "Paid: $" << books[i].price * quantity << "\n";
+                    cout << "Sending ebook (" << books[i].fileType
+                         << ") to: " << email << "\n";
+                }
+                return;
+            }
+        }
+        cout << "Book not found.\n";
+    }
+
+    void removeOldBooks(Role callerRole, int currentYear, int maxAge) {
+        if (!canRemoveOldBooks(callerRole)) {
+            cout << "Access denied: only ADMIN can remove old books.\n";
+            return;
+        }
+        int removed = 0;
+        for (int i = 0; i < bookCount; i++) {
+            if (currentYear - books[i].year > maxAge) {
+                for (int j = i; j < bookCount - 1; j++)
+                    books[j] = books[j + 1];
+                bookCount--;
+                i--;
+                removed++;
+            }
+        }
+        cout << removed << " old book(s) removed.\n";
+    }
+};
+
+// ─── Menu helpers ─────────────────────────────────────────────────────────────
+
+void printMenu(Role role) {
+    cout << "\n=== Book Store Menu [" << roleName(role) << "] ===\n";
+    cout << "1. View Inventory\n";
+    if (canAddBook(role))        cout << "2. Add Book\n";
+    if (canBuyBook(role))        cout << "3. Buy Book\n";
+    if (canRemoveOldBooks(role)) cout << "4. Remove Old Books\n";
+    if (canManageUsers(role))    cout << "5. List Users\n";
+    if (canManageUsers(role))    cout << "6. Add User\n";
+    cout << "0. Logout\n";
+    cout << "Choice: ";
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+int main() {
+    BookStore store;
+
+    // Pre-load a couple of sample books
+    store.addBook(ADMIN, Book("978-1", "Clean Code",      2008, 35.0, "paper", 10));
+    store.addBook(ADMIN, Book("978-2", "Design Patterns", 1994, 45.0, "paper",  5));
+    store.addBook(ADMIN, Book("978-3", "The Pragmatic Programmer", 1999, 40.0, "ebook", 0, "PDF"));
+
+    cout << "============================================\n";
+    cout << "   Role-Based Book Store (Code-First)\n";
+    cout << "============================================\n";
+    cout << "Demo accounts:\n";
+    cout << "  admin     / admin123    (ADMIN)\n";
+    cout << "  staff1    / staff123   (STAFF)\n";
+    cout << "  customer1 / customer123 (CUSTOMER)\n";
+    cout << "============================================\n";
+
+    while (true) {
+        // ── Login ─────────────────────────────────────────────────────────────
+        string username, password;
+        cout << "\nUsername: ";
+        cin  >> username;
+        cout << "Password: ";
+        cin  >> password;
+
+        User current;
+        if (!store.login(username, password, current)) {
+            cout << "Invalid credentials. Try again.\n";
+            continue;
+        }
+        cout << "Welcome, " << current.username
+             << "! Role: " << roleName(current.role) << "\n";
+
+        // ── Session loop ──────────────────────────────────────────────────────
+        int choice;
+        do {
+            printMenu(current.role);
+            cin >> choice;
+
+            if (choice == 1) {
+                store.showInventory(current.role);
+
+            } else if (choice == 2 && canAddBook(current.role)) {
+                string type, isbn, title, fileType;
+                int year, stock = 0;
+                double price = 0.0;
+
+                cout << "Type (paper/ebook/showcase): "; cin >> type;
+                cout << "ISBN: ";  cin >> isbn;
+                cout << "Title: "; cin.ignore(); getline(cin, title);
+                cout << "Year: ";  cin >> year;
+
+                if (type != "showcase") {
+                    cout << "Price: "; cin >> price;
+                    if (type == "paper") {
+                        cout << "Stock: "; cin >> stock;
+                    } else if (type == "ebook") {
+                        cout << "File type (PDF/EPUB): "; cin >> fileType;
+                    }
+                }
+                store.addBook(current.role, Book(isbn, title, year, price, type, stock, fileType));
+
+            } else if (choice == 3 && canBuyBook(current.role)) {
+                string isbn, email, address;
+                int qty;
+                cout << "ISBN: ";     cin >> isbn;
+                cout << "Quantity: "; cin >> qty;
+                cout << "Email: ";    cin >> email;
+                cout << "Address: ";  cin.ignore(); getline(cin, address);
+                store.buyBook(current.role, isbn, qty, email, address);
+
+            } else if (choice == 4 && canRemoveOldBooks(current.role)) {
+                int year, age;
+                cout << "Current year: "; cin >> year;
+                cout << "Max age: ";      cin >> age;
+                store.removeOldBooks(current.role, year, age);
+
+            } else if (choice == 5 && canManageUsers(current.role)) {
+                store.listUsers(current.role);
+
+            } else if (choice == 6 && canManageUsers(current.role)) {
+                string u, p, r;
+                cout << "New username: "; cin >> u;
+                cout << "Password: ";     cin >> p;
+                cout << "Role (0=ADMIN, 1=STAFF, 2=CUSTOMER): "; cin >> r;
+                Role newRole = (r == "0") ? ADMIN : (r == "1") ? STAFF : CUSTOMER;
+                store.addUser(current.role, u, p, newRole);
+
+            } else if (choice != 0) {
+                cout << "Invalid choice or insufficient permissions.\n";
+            }
+
+        } while (choice != 0);
+
+        cout << "Logged out.\n";
+    }
+
+    return 0;
+}
