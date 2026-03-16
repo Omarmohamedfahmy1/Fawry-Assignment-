@@ -1,0 +1,325 @@
+/*
+ * Task 3 – Role-Based Access Control (RBAC) System
+ * Code-First approach: roles, permissions, and users are all defined in code.
+ * No external database or schema file is required; the in-memory structures
+ * represent exactly what a Code-First ORM migration would generate.
+ *
+ * Roles     : Admin, Manager, Customer
+ * Permissions: VIEW_PRODUCTS, ADD_PRODUCT, DELETE_PRODUCT,
+ *              PLACE_ORDER,   VIEW_ALL_ORDERS, MANAGE_USERS
+ *
+ * NOTE: Passwords are hashed with a simple djb2 hash here for demonstration.
+ * In a real application, use a strong algorithm such as bcrypt or Argon2.
+ */
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <sstream>
+using namespace std;
+
+// ─── Simple password hash (djb2) — for demo only ─────────────────────────────
+// Production code should use bcrypt / Argon2 / PBKDF2.
+
+string hashPassword(const string& plain) {
+    unsigned long hash = 5381;
+    for (size_t i = 0; i < plain.size(); i++) {
+        hash = ((hash << 5) + hash) + (unsigned char)plain[i];
+    }
+    ostringstream oss;
+    oss << hash;
+    return oss.str();
+}
+
+// ─── Permission ──────────────────────────────────────────────────────────────
+
+enum Permission {
+    VIEW_PRODUCTS    = 0,
+    ADD_PRODUCT      = 1,
+    DELETE_PRODUCT   = 2,
+    PLACE_ORDER      = 3,
+    VIEW_ALL_ORDERS  = 4,
+    MANAGE_USERS     = 5
+};
+
+string permissionName(Permission p) {
+    switch (p) {
+        case VIEW_PRODUCTS:   return "VIEW_PRODUCTS";
+        case ADD_PRODUCT:     return "ADD_PRODUCT";
+        case DELETE_PRODUCT:  return "DELETE_PRODUCT";
+        case PLACE_ORDER:     return "PLACE_ORDER";
+        case VIEW_ALL_ORDERS: return "VIEW_ALL_ORDERS";
+        case MANAGE_USERS:    return "MANAGE_USERS";
+        default:              return "UNKNOWN";
+    }
+}
+
+// ─── Role ─────────────────────────────────────────────────────────────────────
+
+class Role {
+public:
+    string name;
+    vector<Permission> permissions;
+
+    Role() {}
+    Role(string n, vector<Permission> perms) : name(n), permissions(perms) {}
+
+    bool hasPermission(Permission p) const {
+        return find(permissions.begin(), permissions.end(), p) != permissions.end();
+    }
+
+    void display() const {
+        cout << "  Role: " << name << "\n  Permissions: ";
+        for (size_t i = 0; i < permissions.size(); i++) {
+            cout << permissionName(permissions[i]);
+            if (i + 1 < permissions.size()) cout << ", ";
+        }
+        cout << "\n";
+    }
+};
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
+class User {
+public:
+    int id;
+    string username;
+    string passwordHash;   // stored as a hash, never plain text
+    Role role;
+
+    User() {}
+    User(int i, string u, string ph, Role r) : id(i), username(u), passwordHash(ph), role(r) {}
+
+    bool can(Permission p) const {
+        return role.hasPermission(p);
+    }
+
+    void display() const {
+        cout << "  [" << id << "] " << username << " | ";
+        role.display();
+    }
+};
+
+// ─── RBAC System ─────────────────────────────────────────────────────────────
+
+class RBACSystem {
+private:
+    vector<Role> roles;
+    vector<User> users;
+    int nextUserId;
+    int loggedInId;   // -1 means nobody is logged in
+
+    Role* findRole(const string& name) {
+        for (size_t i = 0; i < roles.size(); i++) {
+            if (roles[i].name == name) return &roles[i];
+        }
+        return nullptr;
+    }
+
+    User* findUser(const string& username) {
+        for (size_t i = 0; i < users.size(); i++) {
+            if (users[i].username == username) return &users[i];
+        }
+        return nullptr;
+    }
+
+    // Returns the currently-logged-in user, or nullptr.
+    // Re-looks up by ID every time so vector reallocations do not invalidate it.
+    User* currentUser() {
+        if (loggedInId == -1) return nullptr;
+        for (size_t i = 0; i < users.size(); i++) {
+            if (users[i].id == loggedInId) return &users[i];
+        }
+        return nullptr;
+    }
+
+    bool assertPermission(Permission p) {
+        User* u = currentUser();
+        if (!u) {
+            cout << "  Error: You must log in first.\n";
+            return false;
+        }
+        if (!u->can(p)) {
+            cout << "  Access denied. Your role (" << u->role.name
+                 << ") does not have permission: " << permissionName(p) << "\n";
+            return false;
+        }
+        return true;
+    }
+
+public:
+    RBACSystem() : nextUserId(1), loggedInId(-1) {
+        // ── Seed roles (Code-First: schema defined here in code) ──────────────
+        roles.push_back(Role("Admin", {
+            VIEW_PRODUCTS, ADD_PRODUCT, DELETE_PRODUCT,
+            PLACE_ORDER, VIEW_ALL_ORDERS, MANAGE_USERS
+        }));
+        roles.push_back(Role("Manager", {
+            VIEW_PRODUCTS, ADD_PRODUCT, DELETE_PRODUCT,
+            VIEW_ALL_ORDERS
+        }));
+        roles.push_back(Role("Customer", {
+            VIEW_PRODUCTS, PLACE_ORDER
+        }));
+
+        // ── Seed default admin user ────────────────────────────────────────────
+        users.push_back(User(nextUserId++, "admin", hashPassword("admin123"), *findRole("Admin")));
+    }
+
+    // ── Authentication ────────────────────────────────────────────────────────
+
+    void login() {
+        string username, password;
+        cout << "  Username: "; cin >> username;
+        cout << "  Password: "; cin >> password;
+
+        User* u = findUser(username);
+        if (u && u->passwordHash == hashPassword(password)) {
+            loggedInId = u->id;
+            cout << "  Logged in as " << username << " (" << u->role.name << ")\n";
+        } else {
+            cout << "  Invalid credentials.\n";
+        }
+    }
+
+    void logout() {
+        User* u = currentUser();
+        if (u) {
+            cout << "  Logged out " << u->username << "\n";
+            loggedInId = -1;
+        } else {
+            cout << "  No user is currently logged in.\n";
+        }
+    }
+
+    // ── User management (MANAGE_USERS required) ───────────────────────────────
+
+    void addUser() {
+        if (!assertPermission(MANAGE_USERS)) return;
+
+        string username, password, roleName;
+        cout << "  New username: ";  cin >> username;
+        cout << "  Password: ";      cin >> password;
+        cout << "  Role (Admin / Manager / Customer): "; cin >> roleName;
+
+        if (findUser(username)) {
+            cout << "  Error: username already exists.\n";
+            return;
+        }
+        Role* r = findRole(roleName);
+        if (!r) {
+            cout << "  Error: role not found.\n";
+            return;
+        }
+        users.push_back(User(nextUserId++, username, hashPassword(password), *r));
+        cout << "  User '" << username << "' created with role '" << roleName << "'.\n";
+    }
+
+    void listUsers() {
+        if (!assertPermission(MANAGE_USERS)) return;
+        cout << "  Users:\n";
+        for (size_t i = 0; i < users.size(); i++) users[i].display();
+    }
+
+    // ── Product actions ───────────────────────────────────────────────────────
+
+    void viewProducts() {
+        if (!assertPermission(VIEW_PRODUCTS)) return;
+        cout << "  [Product list displayed to " << currentUser()->username << "]\n";
+    }
+
+    void addProduct() {
+        if (!assertPermission(ADD_PRODUCT)) return;
+        string name; double price;
+        cout << "  Product name: "; cin.ignore(); getline(cin, name);
+        cout << "  Price: "; cin >> price;
+        cout << "  Product '" << name << "' ($" << price << ") added by "
+             << currentUser()->username << ".\n";
+    }
+
+    void deleteProduct() {
+        if (!assertPermission(DELETE_PRODUCT)) return;
+        string name;
+        cout << "  Product name to delete: "; cin.ignore(); getline(cin, name);
+        cout << "  Product '" << name << "' deleted by " << currentUser()->username << ".\n";
+    }
+
+    // ── Order actions ─────────────────────────────────────────────────────────
+
+    void placeOrder() {
+        if (!assertPermission(PLACE_ORDER)) return;
+        string item; int qty;
+        cout << "  Item: "; cin.ignore(); getline(cin, item);
+        cout << "  Quantity: "; cin >> qty;
+        cout << "  Order placed: " << qty << "x " << item
+             << " by " << currentUser()->username << ".\n";
+    }
+
+    void viewAllOrders() {
+        if (!assertPermission(VIEW_ALL_ORDERS)) return;
+        cout << "  [All orders displayed to " << currentUser()->username << "]\n";
+    }
+
+    // ── Role listing ──────────────────────────────────────────────────────────
+
+    void listRoles() {
+        cout << "  Available roles:\n";
+        for (size_t i = 0; i < roles.size(); i++) {
+            cout << "  ";
+            roles[i].display();
+        }
+    }
+
+    // ── Show current user ─────────────────────────────────────────────────────
+
+    void whoami() {
+        User* u = currentUser();
+        if (!u) { cout << "  Not logged in.\n"; return; }
+        cout << "  Logged in as:\n  ";
+        u->display();
+    }
+};
+
+// ─── Main menu ────────────────────────────────────────────────────────────────
+
+int main() {
+    RBACSystem sys;
+    int choice;
+
+    cout << "=== Role-Based Access Control System (Code-First) ===\n";
+
+    while (true) {
+        cout << "\n--- Menu ---\n";
+        cout << " 1. Login\n";
+        cout << " 2. Logout\n";
+        cout << " 3. Who am I?\n";
+        cout << " 4. List roles\n";
+        cout << " 5. View products\n";
+        cout << " 6. Add product\n";
+        cout << " 7. Delete product\n";
+        cout << " 8. Place order\n";
+        cout << " 9. View all orders\n";
+        cout << "10. Add user\n";
+        cout << "11. List users\n";
+        cout << "12. Exit\n";
+        cout << "Choice: ";
+        cin >> choice;
+
+        switch (choice) {
+            case  1: sys.login();        break;
+            case  2: sys.logout();       break;
+            case  3: sys.whoami();       break;
+            case  4: sys.listRoles();    break;
+            case  5: sys.viewProducts(); break;
+            case  6: sys.addProduct();   break;
+            case  7: sys.deleteProduct();break;
+            case  8: sys.placeOrder();   break;
+            case  9: sys.viewAllOrders();break;
+            case 10: sys.addUser();      break;
+            case 11: sys.listUsers();    break;
+            case 12: cout << "Goodbye!\n"; return 0;
+            default: cout << "  Invalid choice.\n";
+        }
+    }
+}
