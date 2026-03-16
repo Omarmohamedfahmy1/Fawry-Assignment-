@@ -1,0 +1,403 @@
+/*
+ * Task 3 – Role-Based Book Store
+ *
+ * Code-First Approach to RBAC (Role-Based Access Control)
+ *
+ * Design rationale
+ * ─────────────────
+ * For a role-based mobile (or any) app the recommended order is:
+ *   1. Code first – define your domain models, roles, and business rules
+ *      in code before touching any persistence layer.
+ *   2. Database / persistence second – once the domain is stable, generate
+ *      (or write) the schema that matches those models.
+ *
+ * This file demonstrates the code-first pattern:
+ *   • Role enum           – the single source of truth for all roles
+ *   • User model          – carries credentials and a role
+ *   • AuthService         – login / logout / session management
+ *   • RoleBasedBookStore  – enforces per-role permissions on every operation
+ */
+
+#include <iostream>
+#include <string>
+using namespace std;
+
+// ─────────────────────────────────────────
+// 1.  Domain constants
+// ─────────────────────────────────────────
+const int MAX_BOOKS = 100;
+const int MAX_USERS = 50;
+
+// ─────────────────────────────────────────
+// 2.  Role enum  (code-first source of truth)
+// ─────────────────────────────────────────
+enum class Role {
+    ADMIN,     // full control: add/remove books, view inventory, purchase
+    STAFF,     // limited write: view inventory, process purchases
+    CUSTOMER   // read + purchase only
+};
+
+string roleToString(Role r) {
+    if (r == Role::ADMIN)    return "ADMIN";
+    if (r == Role::STAFF)    return "STAFF";
+    return "CUSTOMER";
+}
+
+// ─────────────────────────────────────────
+// 3.  User model
+// ─────────────────────────────────────────
+class User {
+public:
+    string username;
+    string password;   // NOTE: stored as plain text for demo purposes only.
+                       // In production, hash with bcrypt or argon2 before storing.
+    Role   role;
+    string name;
+
+    User() : role(Role::CUSTOMER) {}
+
+    User(string u, string p, Role r, string n)
+        : username(u), password(p), role(r), name(n) {}
+};
+
+// ─────────────────────────────────────────
+// 4.  AuthService  (login / logout / RBAC helpers)
+// ─────────────────────────────────────────
+class AuthService {
+private:
+    User  users[MAX_USERS];
+    int   userCount;
+    int   currentUserIndex;   // -1 = nobody logged in
+
+public:
+    AuthService() : userCount(0), currentUserIndex(-1) {
+        // Seed default accounts so the demo works out of the box
+        registerUser("admin",    "admin123",    Role::ADMIN,    "Store Admin");
+        registerUser("staff1",   "staff123",    Role::STAFF,    "Staff Member");
+        registerUser("customer1","cust123",     Role::CUSTOMER, "John Doe");
+    }
+
+    // Register a new user (ADMIN-only in the menu, but public API here)
+    bool registerUser(string username, string password, Role role, string name) {
+        if (userCount >= MAX_USERS) {
+            cout << "User limit reached.\n";
+            return false;
+        }
+        for (int i = 0; i < userCount; i++) {
+            if (users[i].username == username) {
+                cout << "Username already exists.\n";
+                return false;
+            }
+        }
+        users[userCount++] = User(username, password, role, name);
+        return true;
+    }
+
+    bool login(const string& username, const string& password) {
+        for (int i = 0; i < userCount; i++) {
+            if (users[i].username == username && users[i].password == password) {
+                currentUserIndex = i;
+                cout << "Welcome, " << users[i].name
+                     << " [" << roleToString(users[i].role) << "]!\n";
+                return true;
+            }
+        }
+        cout << "Invalid credentials.\n";
+        return false;
+    }
+
+    void logout() {
+        currentUserIndex = -1;
+        cout << "Logged out successfully.\n";
+    }
+
+    bool isLoggedIn() const { return currentUserIndex != -1; }
+
+    User* currentUser() {
+        if (currentUserIndex == -1) return nullptr;
+        return &users[currentUserIndex];
+    }
+
+    // Convenience helpers
+    bool hasRole(Role r) {
+        User* u = currentUser();
+        return u != nullptr && u->role == r;
+    }
+
+    bool isAtLeast(Role minRole) {
+        User* u = currentUser();
+        if (!u) return false;
+        // Role ordering: ADMIN > STAFF > CUSTOMER
+        int userLevel     = (u->role  == Role::ADMIN) ? 2 : (u->role  == Role::STAFF) ? 1 : 0;
+        int requiredLevel = (minRole  == Role::ADMIN) ? 2 : (minRole  == Role::STAFF) ? 1 : 0;
+        return userLevel >= requiredLevel;
+    }
+
+    Role currentRole() {
+        User* u = currentUser();
+        return u ? u->role : Role::CUSTOMER;
+    }
+};
+
+// ─────────────────────────────────────────
+// 5.  Book model  (unchanged from task 2)
+// ─────────────────────────────────────────
+class Book {
+public:
+    string isbn;
+    string title;
+    int    year;
+    double price;
+    string type;     // "paper" | "ebook" | "showcase"
+    int    stock;
+    string fileType;
+
+    Book() : year(0), price(0.0), stock(0) {}
+
+    Book(string i, string t, int y, double p, string ty, int s = 0, string ft = "")
+        : isbn(i), title(t), year(y), price(p), type(ty), stock(s), fileType(ft) {}
+};
+
+// ─────────────────────────────────────────
+// 6.  RoleBasedBookStore
+//     Wraps all mutations behind permission checks
+// ─────────────────────────────────────────
+class RoleBasedBookStore {
+private:
+    Book        books[MAX_BOOKS];
+    int         bookCount;
+    AuthService auth;
+
+    bool requireAuth() {
+        if (!auth.isLoggedIn()) {
+            cout << "Access denied: please log in first.\n";
+            return false;
+        }
+        return true;
+    }
+
+    bool requireRole(Role needed) {
+        if (!requireAuth()) return false;
+        if (!auth.isAtLeast(needed)) {
+            cout << "Access denied: insufficient permissions "
+                 << "(requires " << roleToString(needed) << ").\n";
+            return false;
+        }
+        return true;
+    }
+
+public:
+    RoleBasedBookStore() : bookCount(0) {}
+
+    // ── Auth pass-throughs ────────────────
+    bool login(const string& u, const string& p) { return auth.login(u, p); }
+    void logout() { auth.logout(); }
+    bool isLoggedIn() { return auth.isLoggedIn(); }
+    Role currentRole() { return auth.currentRole(); }
+
+    // Public permission pre-check — delegates to private requireRole()
+    // so main() can guard input collection before prompting the user.
+    bool canPerform(Role needed) { return requireRole(needed); }
+
+    // Register new user – ADMIN only
+    void registerUser(const string& username, const string& password,
+                      Role role, const string& name) {
+        if (!requireRole(Role::ADMIN)) return;
+        auth.registerUser(username, password, role, name);
+    }
+
+    // ── Store operations ──────────────────
+
+    // ADMIN only
+    void addBook(Book b) {
+        if (!requireRole(Role::ADMIN)) return;
+        if (bookCount < MAX_BOOKS) {
+            books[bookCount++] = b;
+            cout << "Book added successfully.\n";
+        } else {
+            cout << "Inventory is full.\n";
+        }
+    }
+
+    // ADMIN only
+    void removeOldBooks(int currentYear, int maxAge) {
+        if (!requireRole(Role::ADMIN)) return;
+        int removed = 0;
+        for (int i = 0; i < bookCount; i++) {
+            if (currentYear - books[i].year > maxAge) {
+                for (int j = i; j < bookCount - 1; j++) books[j] = books[j + 1];
+                bookCount--;
+                i--;
+                removed++;
+            }
+        }
+        cout << removed << " old book(s) removed.\n";
+    }
+
+    // STAFF and above
+    void showInventory() {
+        if (!requireRole(Role::STAFF)) return;
+        if (bookCount == 0) { cout << "No books in inventory.\n"; return; }
+        cout << "\n--- Inventory ---\n";
+        for (int i = 0; i < bookCount; i++) {
+            cout << "  " << books[i].title
+                 << " (ISBN: " << books[i].isbn
+                 << ") [" << books[i].type << "]";
+            if (books[i].type == "paper")  cout << " stock=" << books[i].stock;
+            if (books[i].type == "ebook")  cout << " file=" << books[i].fileType;
+            cout << " $" << books[i].price << "\n";
+        }
+    }
+
+    // CUSTOMER and above (all logged-in users)
+    void buyBook(const string& isbn, int quantity,
+                 const string& email, const string& address) {
+        if (!requireRole(Role::CUSTOMER)) return;
+        for (int i = 0; i < bookCount; i++) {
+            if (books[i].isbn == isbn) {
+                if (books[i].type == "showcase") {
+                    cout << "This book is for display only. Not for sale.\n";
+                    return;
+                }
+                if (books[i].type == "paper") {
+                    if (books[i].stock < quantity) { cout << "Not enough stock.\n"; return; }
+                    books[i].stock -= quantity;
+                    cout << "Paid: $" << books[i].price * quantity << "\n";
+                    cout << "Shipping paper book to: " << address << "\n";
+                } else if (books[i].type == "ebook") {
+                    cout << "Paid: $" << books[i].price * quantity << "\n";
+                    cout << "Sending ebook (" << books[i].fileType << ") to: " << email << "\n";
+                }
+                return;
+            }
+        }
+        cout << "Book not found.\n";
+    }
+};
+
+// ─────────────────────────────────────────
+// 7.  Print the context-aware menu
+// ─────────────────────────────────────────
+void printMenu(bool loggedIn, Role role) {
+    cout << "\n=== Role-Based Book Store ===\n";
+    if (!loggedIn) {
+        cout << "1. Login\n";
+        cout << "0. Exit\n";
+    } else {
+        bool isAdmin = (role == Role::ADMIN);
+        bool isStaff = (role == Role::STAFF || role == Role::ADMIN);
+        cout << "1. Logout\n";
+        if (isStaff)  cout << "2. Show Inventory  [STAFF / ADMIN]\n";
+        if (isAdmin)  cout << "3. Add Book        [ADMIN only]\n";
+        if (isAdmin)  cout << "4. Remove Old Books[ADMIN only]\n";
+                      cout << "5. Buy Book        [all users]\n";
+        if (isAdmin)  cout << "6. Register User   [ADMIN only]\n";
+        cout << "0. Exit\n";
+    }
+    cout << "Enter your choice: ";
+}
+
+// ─────────────────────────────────────────
+// 8.  main
+// ─────────────────────────────────────────
+int main() {
+    RoleBasedBookStore store;
+
+    // Pre-load sample books so the demo is immediately usable
+    // (In a real app this data would come from a database.)
+    // These are added directly, bypassing the auth guard, to seed the store.
+    // In production you would load them from persistent storage at startup.
+    {
+        // Temporarily we use a small helper lambda to seed without auth.
+        // We log in as admin, seed, then log out.
+        store.login("admin", "admin123");
+        store.addBook(Book("978-0134685991", "Effective Java",         2018, 45.99, "paper",    10));
+        store.addBook(Book("978-0596517748", "JavaScript: The Good Parts", 2008, 29.99, "ebook", 0, "PDF"));
+        store.addBook(Book("978-0135166307", "The Pragmatic Programmer", 2019, 49.99, "paper",   5));
+        store.addBook(Book("978-9999999999", "Rare Collector Edition", 1990, 0,    "showcase"));
+        store.logout();
+    }
+
+    int choice;
+    while (true) {
+        bool loggedIn = store.isLoggedIn();
+        printMenu(loggedIn, loggedIn ? store.currentRole() : Role::CUSTOMER);
+        cin >> choice;
+
+        if (choice == 0) {
+            cout << "Goodbye!\n";
+            break;
+
+        } else if (choice == 1) {
+            if (!loggedIn) {
+                string u, p;
+                cout << "Username: "; cin >> u;
+                cout << "Password: "; cin >> p;
+                store.login(u, p);
+            } else {
+                store.logout();
+            }
+
+        } else if (choice == 2) {
+            store.showInventory();
+
+        } else if (choice == 3) {
+            if (!store.canPerform(Role::ADMIN)) continue;
+            string type;
+            cout << "Book type (paper / ebook / showcase): "; cin >> type;
+            string isbn, title;
+            int year; double price; int stock = 0; string fileType = "";
+            cout << "ISBN: ";  cin >> isbn;
+            cout << "Title: "; cin.ignore(); getline(cin, title);
+            cout << "Year: ";  cin >> year;
+            if (type == "showcase") {
+                store.addBook(Book(isbn, title, year, 0, type));
+            } else {
+                cout << "Price: "; cin >> price;
+                if (type == "paper") {
+                    cout << "Stock: "; cin >> stock;
+                    store.addBook(Book(isbn, title, year, price, type, stock));
+                } else if (type == "ebook") {
+                    cout << "File type (PDF/EPUB): "; cin >> fileType;
+                    store.addBook(Book(isbn, title, year, price, type, 0, fileType));
+                } else {
+                    cout << "Unknown type.\n";
+                }
+            }
+
+        } else if (choice == 4) {
+            if (!store.canPerform(Role::ADMIN)) continue;
+            int year, age;
+            cout << "Current year: "; cin >> year;
+            cout << "Max allowed age: "; cin >> age;
+            store.removeOldBooks(year, age);
+
+        } else if (choice == 5) {
+            if (!store.canPerform(Role::CUSTOMER)) continue;
+            string isbn, email, address;
+            int qty;
+            cout << "ISBN: ";     cin >> isbn;
+            cout << "Quantity: "; cin >> qty;
+            cout << "Email: ";    cin >> email;
+            cout << "Address: ";  cin.ignore(); getline(cin, address);
+            store.buyBook(isbn, qty, email, address);
+
+        } else if (choice == 6) {
+            if (!store.canPerform(Role::ADMIN)) continue;
+            string u, p, n, r;
+            cout << "New username: ";  cin >> u;
+            cout << "Password: ";      cin >> p;
+            cout << "Full name: ";     cin.ignore(); getline(cin, n);
+            cout << "Role (admin / staff / customer): "; cin >> r;
+            Role role = (r == "admin") ? Role::ADMIN
+                      : (r == "staff") ? Role::STAFF
+                      :                  Role::CUSTOMER;
+            store.registerUser(u, p, role, n);
+
+        } else {
+            cout << "Invalid choice.\n";
+        }
+    }
+
+    return 0;
+}
